@@ -1,5 +1,8 @@
 # 🧠 Multi-Agent Tool-Calling System (LangGraph + LangChain)
-中文版本：README.zh-CN.md
+
+🌐 Language / 语言：
+- 🇺🇸 English: [README](./README.md)
+- 🇨🇳 中文: [README.zh-CN.md](./README.zh-CN.md)
 
 ## 📌 Overview
 This project is a production-style multi-agent orchestration system built with **LangGraph** and **LangChain**.
