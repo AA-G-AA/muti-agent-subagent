@@ -1,5 +1,8 @@
 # 🧠 多智能体工具调用系统（LangGraph + LangChain）
-中文版：README.zh-CN.md
+
+🌐 Language / 语言：
+- 🇺🇸 English: [README](./README.md)
+- 🇨🇳 中文: [README.zh-CN.md](./README.zh-CN.md)
 
 ## 📌 项目概述
 本项目基于**LangGraph**与**LangChain**打造生产级多智能体编排系统，支持工具调用、子智能体协同、幂等操作、链路观测与人机交互流程。
