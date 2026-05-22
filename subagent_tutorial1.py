@@ -42,7 +42,13 @@ root_logger.setLevel(logging.INFO)
 root_logger.addHandler(handler)
 
 logger = logging.getLogger(__name__)
-dotenv.load_dotenv(Path(__file__).parent.parent / ".env.example")
+dotenv.load_dotenv(Path(__file__).parent / ".env")
+# 启动时校验必要的环境变量
+_required = ["OPENAI_BASE_URL", "OPENAI_API_KEY", "EMAIL_SENDER",
+             "EMAIL_PASSWORD", "SHARE_CALENDER", "CALENDER_BOT_APP_SECRET"]
+_missing = [k for k in _required if not os.getenv(k)]
+if _missing:
+    raise RuntimeError(f"缺少必要的环境变量：{', '.join(_missing)}")
 model = init_chat_model(
     base_url=os.getenv("OPENAI_BASE_URL"),
     api_key=os.getenv("OPENAI_API_KEY"),
@@ -53,8 +59,8 @@ model = init_chat_model(
     timeout=120,
 )
 store = InMemoryStore()
-os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING")
-os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
+# os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING")
+# os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 
 _token_cache = {
     "token": None,
