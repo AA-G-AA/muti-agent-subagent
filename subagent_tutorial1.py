@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 import time
 from langgraph.types import Command
 import logging
-
+from pathlib import Path
 import uuid
 
 import contextvars
@@ -42,10 +42,10 @@ root_logger.setLevel(logging.INFO)
 root_logger.addHandler(handler)
 
 logger = logging.getLogger(__name__)
-dotenv.load_dotenv('/lac/.env')
+dotenv.load_dotenv(Path(__file__).parent.parent / ".env.example")
 model = init_chat_model(
-    base_url=os.getenv("OPENAI_GLM_BASE_URL"),
-    api_key=os.getenv("OPENAI_GLM_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL"),
+    api_key=os.getenv("OPENAI_API_KEY"),
     model_provider="openai",
     model="GLM-4.5-Flash",
     profile={"max_input_tokens": 128000},
