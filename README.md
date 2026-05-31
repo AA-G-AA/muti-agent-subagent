@@ -1,125 +1,124 @@
 
-# 🧠 Multi-Agent Tool-Calling System (LangGraph + LangChain)
+# 🧠 多智能体工具调用系统（LangGraph + LangChain）
 
 🌐 Language / 语言：
 
-* 🇺🇸 English: [README](https://www.google.com/search?q=./README.md)
-* 🇨🇳 中文: [README.zh-CN.md](https://www.google.com/search?q=./README.zh-CN.md)
+- 🇨🇳 中文: [README](./README.md)
+- 🇺🇸 English: [README.zh-CN.md](./README.EN.md)
 
-## 📌 Project Overview
+## 📌 项目概述
 
-This project is a production-grade Multi-Agent orchestration system built on **LangGraph** and **LangChain**. Deeply integrated with a **Redis distributed lock**, it implements deterministic idempotency protection for tool calling, hard-coded code gateway interception, full-link observability, and Human-In-The-Loop (HITL) workflows.
+本项目基于 **LangGraph** 与 **LangChain** 打造生产级多智能体（Multi-Agent）编排系统，深度结合 **Redis 分布式锁** 实现了工具调用的确定性幂等防护、硬编码代码网关拦截、全链路观测与人机交互流程（HITL）。
 
-**Applicable Real-world Automation Scenarios:**
+适用实际自动化业务场景：
 
-* Enterprise-level intelligent calendar & schedule arrangement.
-* Automated email workflow processing & semantic-de-noising debt collection.
-* Cross-platform distributed Multi-Agent collaborative task scheduling.
+* 企业级日程日历智能排布
+* 自动化邮件流处理与语义脱敏催收
+* 跨平台多智能体分布式协同调度
 
-## 🚀 Features
+## 🚀 功能特性
 
-### 🧩 Multi-Agent Architecture
+### 🧩 多智能体架构
 
-* **Supervisor Agent**: Responsible for dynamic task decomposition, routing distribution, and global workflow orchestration.
-* **Calendar Agent**: Focuses on schedule planning, busy/free status analysis, and precise calendar event writing.
-* **Email Agent**: Focuses on email body polishing, recipient list composition, and asynchronous delivery.
+* **调度总管智能体 (Supervisor)**：负责复杂任务的动态拆解、路由分发与全局流程统筹。
+* **日历智能体 (Calendar Agent)**：专注日程规划、忙闲状态分析与日历精确写入。
+* **邮件智能体 (Email Agent)**：专注邮件正文润色、收件人列表编排与异步投递。
 
-### 🛠 Tools & Hard-coded Defense System
+### 🛠 工具与硬编码防御体系
 
-* `Calendar` — Interfaces with the Feishu (Lark) Calendar API to create events (**Built-in Python deterministic interval interception gateway**).
-* `send_email` — An asynchronous email delivery tool based on the SMTP protocol.
-* `get_current_datetime` — Provides the system's real-time ISO timestamp as a baseline to eliminate LLM hallucinations.
-* `get_not_available_time_slots` — (Internal Defense Function) Dynamically fetches the latest busy time slots and returns a pure Python list for seamless deserialization at the tool layer.
+* `Calendar` — 对接飞书日历 API 创建事件（**内置 Python 确定性区间拦截网关**）。
+* `send_email` — 基于 SMTP 协议的异步邮件投递工具。
+* `get_current_datetime` — 提供系统实时 ISO 时间基准，消除大模型幻觉。
+* `get_not_available_time_slots` — （内部防御函数）动态拉取最新忙碌时段，返回纯 Python 列表，与工具层无缝反序列化。
 
-### 🔁 Distributed Idempotency Protection Layer
+### 🔁 分布式幂等防护层
 
-Powered by a custom `@idempotent` decorator to fully intercept duplicate tool invocations caused by network jitter, user double-clicks, or LLM dead loops:
+ `@idempotent` 装饰器，全面拦截因网络抖动、用户重复点击或大模型死循环导致的工具重发：
 
-* **Dynamic Hashing Strategy**: Generates a unique MD5 key based on specific business dimensions (e.g., `User + Time + Title`), blocking interference from the randomness of generative LLM text.
-* **Finite State Machine Lifecycle**: Supports `running` (lock acquired & executing), `done` (cache hit, direct return), and `failed` (failed execution, auto-released for retries).
-* **Cascade Cleanup Mechanism**: Supports delete actions to actively erase corresponding Redis idempotency locks, ensuring strong consistency with the real world.
+* **动态哈希策略**：基于特定业务维度（如 `User + Time + Title`）生成唯一 MD5 密钥，阻断生成式 LLM 文本随机性带来的干扰。
+* **状态机生命周期**：支持 `running`（抢锁执行中）、`done`（命中缓存直接返回）、`failed`（失败自动释放，允许重试）。
+* **联动清理机制**：支持删除动作主动反向擦除 Redis 幂等锁，实现现实世界状态的强一致性。
 
-### 📊 Observability & Operations Auditing
+### 📊 可观测能力与操作审计
 
-* Universal propagation of **trace_id** across the entire call chain (cascaded via ContextVars).
-* Strict **Tool Operation Auditing Logs**: Scans the full lifecycle messages of the Supervisor Agent to prevent a sub-agent's natural language responses from breaking successful workflows.
-* Middleware-level (`handle_tool_errors`) cascade execution trajectory tracking.
+* 全链路 **trace_id** 上下文统一传递（基于 ContextVars 级联）。
+* 严密的**工具操作审计日志**：主助理全生命周期消息扫描，防止子 Agent 大白话回话误伤成功流水。
+* 中间件层级（`handle_tool_errors`）级联执行轨迹追踪。
 
-### 🧠 Context Management
+### 🧠 上下文管理
 
-* Conversation summary middleware to dynamically prune the context window.
-* Relies on **LangGraph State** to achieve transparent shared-state communication between multiple agents.
+* 对话内容摘要中间件，动态裁剪上下文窗口。
+* 依托 **LangGraph State** 实现多智能体之间透明的共享运行状态通信。
 
-### 👤 Human-In-The-Loop (HITL)
+### 👤 人机交互流程 (HITL)
 
-* Interrupted tool approval mechanism, supporting online approval, rejection, and dynamic editing for sensitive operations (e.g., sending emails, batch calendar modifications).
+* 中断式工具审批机制，支持敏感操作（如发邮件、批量改日程）的线上审批、驳回与动态编辑修改。
 
-### 🔄 Exception Handling Schemes
+### 🔄 异常处理方案
 
-* **Business Error (`BusinessError`)**: Propagated upward to the LLM, triggering the model's autonomous reasoning for clarification or retries (e.g., prompting the user to change a conflicting time).
-* **Fatal Error (`FatalError`)**: Terminates the pipeline immediately and triggers manual intervention.
+* **业务异常 (BusinessError)**：向上传递给 LLM，触发大模型自主推理解释或重试（如提示用户更换冲突时间）。
+* **致命异常 (FatalError)**：终止流水，触发人工介入。
 
-## 🏗 System Architecture & Execution Flow
+## 🏗 系统架构与执行流
 
 ```text
-               User Request
-                    │
-                    ▼
-          Supervisor Agent
-                    │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-  Calendar Agent           Email Agent
-        │                       │
- (Code Gateway Defense)   (SMTP Async Delivery)
-  ├── Get Current Time     └── 🔑 Redis Idempotent Lock
-  ├── 🛡️ Real-time Conflict Interception
-  └── 🔑 Redis Idempotent Creation
+               用户请求
+                  │
+                  ▼
+            调度总管智能体 (Supervisor)
+                  │
+        ┌─────────┴─────────┐
+        ▼                   ▼
+    日历智能体           邮件智能体
+        │                   │
+  (代码网关防御)             (SMTP 异步投递)
+   ├── 获取当前时间          └── 🔑 Redis 幂等防重锁
+   ├── 🛡️ 实时冲突拦截
+   └── 🔑 Redis 幂等创建
 
 ```
 
-## 🔁 Idempotency & Gateway Design Rules
+## 🔁 幂等与网关设计规则
 
-### 1. Core Hashing Formula
+### 1. 核心哈希公式
 
-For every tool invocation, the middleware calculates an MD5 hash based on **core business dimensions**:
+每次调用工具，中间件会根据**核心业务维度**计算 MD5：
 
 ```python
-# Calendar Lock: Locks the time interval; LLM description tweaks won't bypass the lock
+# 日历锁：锁死时间段，大模型改描述不影响拦截
 md5(user_id + title + start_time + end_time)
 
-# Email Lock: Locks the recipients and the subject
+# 邮件锁：锁死收件人与主题
 md5(user_id + to_list + cc_list + subject + body)
 
 ```
 
-### 2. Dual-Defense Workflow
+### 2. 双重防御网工作流
 
-1. **First Line of Defense (Code Gateway)**: The tool internally fetches busy time slots, deserializes them safely using `json.loads()`, and runs a mathematical check via the intersection formula: `max(req_start, slot_start) < min(req_end, slot_end)`. If they overlap, a `BusinessError` is raised immediately.
-2. **Second Line of Defense (Redis Lock)**: After passing the gateway, the middleware attempts to acquire the lock (`r.set(redis_key, ..., nx=True)`). If successful, it runs the core logic; if it hits an existing lock, it intercepts the call and returns the cached result.
+1. **第一道防线（代码网关）**：工具内部强行拉取忙碌时段，使用 `json.loads()` 安全反序列化，通过交集公式 `max(req_start, slot_start) < min(req_end, slot_end)` 进行数学判定，重叠则直接抛出 `BusinessError`。
+2. **第二道防线（Redis 锁）**：通过网关后，中间件尝试抢锁（`r.set(redis_key, ..., nx=True)`）。抢锁成功执行核心逻辑；命中则直接截断并吐出缓存结果。
 
-## 📦 Usage Examples
+## 📦 使用示例
 
-### 📅 Multi-Step Composite Workflow Test
+### 📅 多步骤复合业务流程测试
 
 ```python
 user_request = """
-Set up a 1-hour meeting with the finance team at 3:00 PM tomorrow. 
-The subject is "Finance Meeting", the description is "Submit new financial reports", 
-and the location is Room 311. 
-Also, send a reminder email to xxxx@qq.com asking them to hurry up and submit the new reports.
+明天15点与财务团队开会，时长1小时，会议主题财务会议，
+描述提交新的财务报表，地点在311会议室。
+同时给xxxx@qq.com发送一封提醒邮件，让他们赶快提交新的财务报表。
 """
 
 ```
 
-## 🧪 Getting Started
+## 🧪 项目启动
 
 ```bash
 python sub.py
 
 ```
 
-## ⚙️ Environment Variables Configuration
+## ⚙️ 环境变量配置
 
 ```env
 EMAIL_SENDER=xxx@qq.com
@@ -133,40 +132,41 @@ OPENAI_GLM_BASE_URL=xxx
 
 ```
 
-## 📊 Real Audit Log Snippet
+## 📊 真实操作审计日志片段
 
 ```log
-trace_id=... [create_calendar_event] Attempting to acquire lock redis_key=idempotent:3963f769ea...
-trace_id=... [create_calendar_event] 🎯 Idempotency hit, returning cached result directly
-trace_id=... agents.supervisor_agent - Last AI message from calendar_agent...
-trace_id=... 🛡️ Code Gateway: Successfully extracted busy slots from context: ["09:00-10:00", "14:00-15:00"]
+trace_id=... [create_calendar_event] 尝试抢锁 redis_key=idempotent:3963f769ea...
+trace_id=... [create_calendar_event] 🎯 幂等命中，直接返回缓存结果
+trace_id=... agents.supervisor_agent - calender_agent最后一条ai消息...
+trace_id=... 🛡️ 代码网关：成功从上下文捞出忙碌时段: ["09:00-10:00", "14:00-15:00"]
 
 ```
 
-## 🧠 Tech Stack
+## 🧠 技术栈
 
 * **LangChain & LangGraph (v0.2+)**
-* **GLM-4.5-Flash** (Compatible call via OpenAI Adapter)
-* **Redis** (Core component for distributed locking and result caching)
-* Feishu Calendar Open API (Tenant Access Token Bot Authentication)
+* **GLM-4.5-Flash** (基于 OpenAI 适配器兼容调用)
+* **Redis** (分布式锁与结果缓存基础组件)
+* 飞书日历开放接口 (Tenant Access Token 机器人认证)
 * Python SMTP / asyncio / httpx
 
-## 🔥 Project Highlights (Why is it Production-Grade?)
+## 🔥 项目亮点（为什么说它是生产级？）
 
-1. **Eliminating LLM "Hallucinated" Conflicts**: Time conflict detection is stripped away from the LLM and offloaded to a deterministic Python code gateway, ensuring 100% interception of overlapping schedules.
-2. **Resolving Agent "Split-Personality" Auditing**: The supervisor's audit uses full-lifecycle chain scanning. Even if a sub-agent reports back in casual natural language, it won't trigger a false-positive "tool not called" hard-circuit break.
-3. **Crash-Proof Data Type Design**: Strictly enforces `JSON str ── json.loads ── Python List` conversions across the data pipeline, completely wiping out character slicing bugs and implicit exception swallowing.
+1. **杜绝大模型“脑补”冲突**：时间冲突不用大模型判断，下沉到 Python 确定性代码网关，100% 拦截时间重叠。
+2. **完美解决智能体精神分裂**：主助理审计改用全生命周期链路扫描，子智能体用大白话邀功也不会触发“工具未调用”的硬熔断。
+3. **数据类型防砸设计**：数据流转全链路严格进行 `JSON str ── json.loads ── Python List` 转换，杜绝了字符切片拆分和隐式异常吞噬。
 
-### 📊 Execution Verification
+### 📊 运行实测
+![结果](./imgs/result.png)
 
-## 🚀 Future Roadmap
 
-* [√] **Distributed Idempotency Control**: Integrate Redis to implement distributed locking and cache expiration self-healing mechanisms.
-* [√] **Full-Chain Async Evolution**: Refactor toolchains with asyncio/httpx for non-blocking asynchronous execution.
-* [ ] **Persistent Preference Memory**: Introduce the LangGraph Store mechanism to achieve non-blocking asynchronous writing and long-term storage of user preferences.
-* [ ] **Separated Front-End Chat (Web-UI)**: Build backend APIs with FastAPI (Async) and utilize WebSocket / SSE (Server-Sent Events) to achieve a ChatGPT-like streaming typewriter conversation effect.
-* [ ] **Dynamic Interactive Approval Flow & Lock Management**: Combine LangGraph's HITL mechanism to push an interactive approval card component to the front-end when sensitive tools are triggered, while integrating a Redis key management dashboard to manually release idempotency locks.
-* [ ] **Full-Chain Async Latency Tracking (OpenTelemetry)**：Integrate OTel into FastAPI to graphically trace the latency profile across the "User Prompt -> Agent Orchestration -> Tool Invocation -> Model Response" lifecycle, pinning down front-end lag bottlenecks.
-* [ ] **High-Concurrency Multi-User Queue (Message Queue Shaving)**: Introduce RabbitMQ / Kafka to handle chat event streams asynchronously, performing peak shaving for high-concurrency requests to ensure Agent system stability under heavy user loads.
+## 🚀 后续优化方向
 
+* [√] 接入 Redis 实现分布式幂等控制与过期自愈机制
+* [√] 基于 asyncio/httpx 实现全链路异步非阻塞工具链调用
+* [ ] 引入 LangGraph Store 实现异步非阻塞的用户偏好(Preference)长效记忆
+* [ ] **前后端分离聊天交互 (Web-UI)**：基于 FastAPI (Async) 搭建后端接口，利用 WebSocket / SSE (Server-Sent Events) 技术实现流式（Streaming）对话效果。
+* [ ] **动态交互审批流与锁管理**：结合 LangGraph 的 HITL 机制，当触发敏感工具时，通过异步接口向前端推送【审批卡片组件】；同时在后台集成 Redis 键值管理，支持手动释放幂等锁。
+* [ ] **全链路异步耗时监控 (OpenTelemetry)**：在 FastAPI 中集成 OTel 监控，对“用户提问-Agent编排-工具调用-模型响应”的全生命周期进行图形化耗时追踪，精准定位前端卡顿瓶颈。
+* [ ] **高并发多用户队列 (消息队列削峰)**：引入 RabbitMQ / Kafka 异步处理聊天事件流，对高并发请求进行排队削峰，保障多用户同时在线聊天时 Agent 系统的稳定性。
 ---
