@@ -4,7 +4,7 @@
 🌐 Language / 语言：
 
 - 🇨🇳 中文: [README](./README.md)
-- 🇺🇸 English: [README.zh-CN.md](./README.EN.md)
+- 🇺🇸 English: [README.EN.md](./README.EN.md)
 
 
 ## 📌 Project Overview
