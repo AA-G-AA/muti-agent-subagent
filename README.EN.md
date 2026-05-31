@@ -1,11 +1,9 @@
-
 # 🧠 Multi-Agent Tool-Calling System (LangGraph + LangChain)
 
 🌐 Language / 语言：
 
 - 🇨🇳 中文: [README](./README.md)
 - 🇺🇸 English: [README_EN.md](./README.EN.md)
-
 
 ## 📌 Project Overview
 
@@ -151,16 +149,50 @@ trace_id=... 🛡️ Code Gateway: Successfully extracted busy slots from contex
 * **Redis** (Core component for distributed locking and result caching)
 * Feishu Calendar Open API (Tenant Access Token Bot Authentication)
 * Python SMTP / asyncio / httpx
+* PostgreSQL (Long-term memory Store)
+* tenacity (Network retry)
 
 ## 🔥 Project Highlights (Why is it Production-Grade?)
 
-1. **Eliminating LLM "Hallucinated" Conflicts**: Time conflict detection is stripped away from the LLM and offloaded to a deterministic Python code gateway, ensuring 100% interception of overlapping schedules.
-2. **Resolving Agent "Split-Personality" Auditing**: The supervisor's audit uses full-lifecycle chain scanning. Even if a sub-agent reports back in casual natural language, it won't trigger a false-positive "tool not called" hard-circuit break.
-3. **Crash-Proof Data Type Design**: Strictly enforces `JSON str ── json.loads ── Python List` conversions across the data pipeline, completely wiping out character slicing bugs and implicit exception swallowing.
+Moving LLMs from demo toys to enterprise production lines requires engineering design for **data determinism, system idempotency, long-term memory, and link observability**. This project implements the following core designs to address deep-water pain points such as FSM split, model hallucination, and tool infinite-loop concurrency conflicts in multi-agent orchestration:
+
+### 1. Deterministic Rule Gateway —— Eliminating LLM "Hallucinated" Conflicts
+
+* **Business Pain Point**: Traditional Agents rely entirely on LLM reasoning to determine time conflicts. Affected by model hallucination, this easily causes time overlaps and logical dead loops in calendar scheduling.
+* **Architectural Design**: The project completely strips away the "initial review right" of generative LLMs over sensitive boundary conditions, building a pure Python hard-coded **time interval geometric interception gateway**.
+* **Impact**: Uses the geometric intersection algorithm `max(req_start, slot_start) < min(req_end, slot_end)` for strict mathematical verification, intercepting 100% of schedule overlaps before the tool layer to achieve **deterministic circuit breaking** at the business level.
+
+### 2. Lifecycle Stream Auditor —— Resolving Agent "Split-Personality" Auditing
+
+* **Business Pain Point**: In "Supervisor-SubAgent" collaborations, sub-agents often output natural language text rich with emojis or casual phrasing. Traditional single-message interception mechanisms can easily misinterpret this as a failed tool invocation, triggering false-positive system circuit breaking.
+* **Architectural Design**: Reengineered the Supervisor Agent's auditing operator to use a **lifecycle message full-dimensional scanning mechanism** cascaded via `ContextVars`.
+* **Impact**: Dynamically captures and purges status streams across agent nodes, resolving FSM conflicts and split-personality issues in the multi-agent collaboration chain to ensure **strong consistency** in pipeline throughput.
+
+### 3. Multi-Dimensional Business Salting Hash —— Distributed Concurrency Idempotency Protection Layer (Idempotent Shield)
+
+* **Business Pain Point**: Generative LLM text is inherently random. If network jitter, front-end user double-clicks, or LLM dead loops cause duplicate tool invocations, traditional text-hash-based deduplication fails completely since a few changed characters alter the hash.
+* **Architectural Design**: Developed a custom `@idempotent` decorator using a **core business dimension extraction algorithm**. It extracts `User + Time + Title` for calendar locks and `To_List + Subject` for email locks to calculate a salted MD5 hash, combined with Redis for distributed lease mutual exclusion.
+* **Impact**: Establishes a standard FSM lifecycle (`running` lock acquisition / `done` cache hit interception / `failed` auto-release with exponential backoff retries). Even if the LLM changes its phrasing in descriptions, the system precisely blocks duplicates.
+
+### 4. Full-Chain Crash-Proof Architecture & Strong Type Conversion Mechanism
+
+* **Business Pain Point**: During multi-agent context exchanges, complex formats returned by underlying tools (such as JSON strings) can be incorrectly recognized as primitive characters after multi-turn conversation truncation, triggering implicit type slicing errors (Slice Fragmentation Bug).
+* **Architectural Design**: Implements a strict type defense mechanism across the entire chain, establishing a closed-loop gateway of `JSON Str ── json.loads() ── Python Native List` at all state transition nodes.
+* **Impact**: Eliminates implicit exceptions before they reach tool execution entry points, equipping the system with high fault tolerance and crash-proof data handling capabilities.
+
+---
+
+## 🧠 Multi-Agent Collaboration & Tool Protection Capabilities
+
+* ▪ **Dual Defense Matrix**: First Line of Defense: Python mathematical interval rule gateway ── Second Line of Defense: Redis distributed lease mutual exclusion lock.
+* ▪ **Lifecycle Trace Auditing**: Propagates `trace_id` uniformly based on link context, ensuring 100% compatibility with casual natural language sub-agent responses.
+* ▪ **Long-Term Preference Memory**: Relies on the LangGraph Store mechanism to achieve non-blocking asynchronous writing of user preferences across sessions.
+* ▪ **Human-In-The-Loop (HITL) Safety Sandbox**: Supports layer-level interruption and suspension for sensitive operations (email/calendar modifications), providing controllable human-agent collaboration through online editing, rejection, and re-confirmation.
+* ▪ **Full-Chain Async Base**: Built on asyncio + httpx for completely asynchronous toolchains, bypassing the serial blocking performance bottlenecks of traditional AI orchestration.
+
+---
 
 ### 📊 Execution Verification
-
-![结果](./imgs/result.png)
 
 ## 🚀 Future Roadmap
 
@@ -169,7 +201,5 @@ trace_id=... 🛡️ Code Gateway: Successfully extracted busy slots from contex
 * [ ] **Persistent Preference Memory**: Introduce the LangGraph Store mechanism to achieve non-blocking asynchronous writing and long-term storage of user preferences.
 * [ ] **Separated Front-End Chat (Web-UI)**: Build backend APIs with FastAPI (Async) and utilize WebSocket / SSE (Server-Sent Events) to achieve a ChatGPT-like streaming typewriter conversation effect.
 * [ ] **Dynamic Interactive Approval Flow & Lock Management**: Combine LangGraph's HITL mechanism to push an interactive approval card component to the front-end when sensitive tools are triggered, while integrating a Redis key management dashboard to manually release idempotency locks.
-* [ ] **Full-Chain Async Latency Tracking (OpenTelemetry)**：Integrate OTel into FastAPI to graphically trace the latency profile across the "User Prompt -> Agent Orchestration -> Tool Invocation -> Model Response" lifecycle, pinning down front-end lag bottlenecks.
+* [ ] **Full-Chain Async Latency Tracking (OpenTelemetry)**: Integrate OTel into FastAPI to graphically trace the latency profile across the "User Prompt -> Agent Orchestration -> Tool Invocation -> Model Response" lifecycle, pinning down front-end lag bottlenecks.
 * [ ] **High-Concurrency Multi-User Queue (Message Queue Shaving)**: Introduce RabbitMQ / Kafka to handle chat event streams asynchronously, performing peak shaving for high-concurrency requests to ensure Agent system stability under heavy user loads.
-
----
