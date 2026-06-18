@@ -8,51 +8,57 @@
 
 ## 📌 项目概述
 
-本项目基于 **LangGraph** 与 **LangChain** 打造生产级多智能体（Multi-Agent）编排系统，深度结合 **Redis 分布式锁** 实现了工具调用的确定性幂等防护、硬编码代码网关拦截、全链路观测与人机交互流程（HITL）。
+本项目基于 **LangGraph** 与 **LangChain** 构建多智能体（Multi-Agent）编排系统，结合 **Redis 分布式锁** 实现了工具调用的幂等防护、代码网关拦截、全链路日志追踪与人机交互流程（HITL）。
 
-适用实际自动化业务场景：
+适用场景：
 
-* 企业级日程日历智能排布
-* 自动化邮件流处理与语义脱敏催收
-* 跨平台多智能体分布式协同调度
+* 基于飞书日历的日程自动排布
+* 邮件自动发送与通知
+* 多智能体协同调度
 
 ## 🚀 功能特性
 
 ### 🧩 多智能体架构
 
-* **调度总管智能体 (Supervisor)**：负责复杂任务的动态拆解、路由分发与全局流程统筹。
-* **日历智能体 (Calendar Agent)**：专注日程规划、忙闲状态分析与日历精确写入。
-* **邮件智能体 (Email Agent)**：专注邮件正文润色、收件人列表编排与异步投递。
+* **主调度 Agent (Supervisor)**：拆解用户请求，分派任务给子 Agent，汇总结果。
+* **日历 Agent (Calendar Agent)**：处理日程查询、忙闲判断、创建飞书日历事件。
+* **邮件 Agent (Email Agent)**：负责邮件撰写、收件人提取、SMTP 发送。
 
-### 🛠 工具与硬编码防御体系
+### 🛠 工具与防御机制
 
-* `Calendar` — 对接飞书日历 API 创建事件（**内置 Python 确定性区间拦截网关**）。
-* `send_email` — 基于 SMTP 协议的异步邮件投递工具。
-* `get_current_datetime` — 提供系统实时 ISO 时间基准，消除大模型幻觉。
-* `get_not_available_time_slots` — （内部防御函数）动态拉取最新忙碌时段，返回纯 Python 列表，与工具层无缝反序列化。
+* `create_calendar_event` — 调用飞书 API 创建日历事件（内置 Python 区间拦截检查冲突）。
+* `send_email` — 基于 SMTP 的邮件发送工具，支持抄送和附件。SMTP 同步操作通过 `asyncio.to_thread` 丢到线程池，不阻塞事件循环。
+* `get_current_datetime` — 获取当前时间，防止 LLM 对日期产生幻觉。
+* `get_not_available_time_slots` — 内部函数，返回已被占用的时段列表供代码网关比对。
+* 飞书 Token 获取使用**双重检查锁模式**：先查 Redis 缓存，有则直接返回；没有则抢分布式锁，抢到后再次检查缓存，只有真正过期才去刷新 API。高并发下仅 1 个请求刷新 Token，其余等锁释放后读缓存，避免击穿飞书限频。
 
-### 🔁 分布式幂等防护层
+### 🔁 分布式幂等锁
 
- `@idempotent` 装饰器，全面拦截因网络抖动、用户重复点击或大模型死循环导致的工具重发：
+ `@idempotent` 装饰器，防止因网络重试、重复点击或 LLM 重复调用导致的工具多次执行：
 
-* **动态哈希策略**：基于特定业务维度（如 `User + Time + Title`）生成唯一 MD5 密钥，阻断生成式 LLM 文本随机性带来的干扰。
-* **状态机生命周期**：支持 `running`（抢锁执行中）、`done`（命中缓存直接返回）、`failed`（失败自动释放，允许重试）。
-* **联动清理机制**：支持删除动作主动反向擦除 Redis 幂等锁，实现现实世界状态的强一致性。
+* **基于业务维度哈希**：取 `User + Time + Title` 等关键字段计算 MD5，LLM 改描述不影响幂等性。
+* **三种状态管理**：`running`（执行中）、`done`（已缓存，直接返回）、`failed`（失败，允许重试）。
+* **关联清理**：删除会话时同步清理对应的 Redis 锁。
 
-### 📊 可观测能力与操作审计
+### 📊 日志追踪
 
-* 全链路 **trace_id** 上下文统一传递（基于 ContextVars 级联）。
-* 严密的**工具操作审计日志**：主助理全生命周期消息扫描，防止子 Agent 大白话回话误伤成功流水。
-* 中间件层级（`handle_tool_errors`）级联执行轨迹追踪。
+* 全链路 **trace_id** 贯穿每次请求（基于 ContextVars），方便定位问题。
+* 工具调用日志记录完整入参和返回值，便于审计。
+* 中间件 `handle_tool_errors` 记录错误堆栈和重试信息。
 
 ### 🧠 上下文管理
 
 * 对话内容摘要中间件，动态裁剪上下文窗口。
-* 依托 **LangGraph State** 实现多智能体之间透明的共享运行状态通信。
+* 依托 **LangGraph State** 实现多智能体之间的状态共享。
 
-### 👤 人机交互流程 (HITL)
+### 👤 人机交互 (HITL)
 
-* 中断式工具审批机制，支持敏感操作（如发邮件、批量改日程）的线上审批、驳回与动态编辑修改。
+* 敏感操作（发邮件、创建日程）可触发审批中断，支持通过、驳回或修改参数后放行。
+
+### 🔌 前端连接管理
+
+* WebSocket 每 30 秒发送心跳保活（`type: ping`），防止 NAT 超时断连。
+* 断线后自动重连（5 秒间隔），用户无感。
 
 ### 🔄 异常处理方案
 
@@ -65,11 +71,11 @@
                用户请求
                   │
                   ▼
-            调度总管智能体 (Supervisor)
+            主调度 Agent (Supervisor)
                   │
         ┌─────────┴─────────┐
         ▼                   ▼
-    日历智能体           邮件智能体
+    日历 Agent           邮件 Agent
         │                   │
   (代码网关防御)             (SMTP 异步投递)
    ├── 获取当前时间          └── 🔑 Redis 幂等防重锁
@@ -88,9 +94,8 @@
 # 日历锁：锁死时间段，大模型改描述不影响拦截
 md5(user_id + title + start_time + end_time)
 
-# 邮件锁：锁死收件人与主题
-md5(user_id + to_list + cc_list + subject + body)
-
+# 邮件锁：锁死收件人与主题（to_list 做了 sorted()，LLM 排列顺序不影响幂等性）
+md5(user_id + sorted(to_list) + sorted(cc_list) + subject + body)
 ```
 
 ### 2. 双重防御网工作流
@@ -114,8 +119,7 @@ user_request = """
 ## 🧪 项目启动
 
 ```bash
-python sub.py
-
+python main.py
 ```
 
 ## ⚙️ 环境变量配置
@@ -127,10 +131,39 @@ EMAIL_PASSWORD=xxx
 CALENDER_BOT_APP_SECRET=xxx
 SHARE_CALENDER=xxx
 
-OPENAI_GLM_API_KEY=xxx
-OPENAI_GLM_BASE_URL=xxx
+OPENAI_API_KEY=xxx
+OPENAI_BASE_URL=xxx
 
 ```
+
+## 📁 项目结构
+
+```
+├── main.py                  # 后端入口 (FastAPI + WebSocket)
+├── config.py                # 全局配置 + 日志 + 环境变量
+├── middleware.py             # 幂等装饰器 + 错误处理中间件
+├── storage.py               # Redis + PostgreSQL 连接管理
+├── errors.py                # 自定义异常 (BusinessError / FatalError)
+├── agents/
+│   ├── supervisor_agent.py  # 主调度 Agent
+│   ├── calender_agent.py    # 日历 Agent
+│   └── email_agent.py       # 邮件 Agent
+├── tools/
+│   ├── calender_tool.py     # 飞书日历工具 + 代码网关
+│   └── email_tool.py        # QQ邮箱发送工具（含附件支持）
+├── api/
+│   ├── chat.py              # WebSocket 聊天接口
+│   └── session.py           # 会话 CRUD API
+├── db/
+│   ├── mysql.py             # MySQL 连接池
+│   ├── models.py            # 建表语句
+│   └── crud.py              # 数据库操作
+├── utils/
+│   └── feishu.py            # 飞书 Token（双重检查锁）+ 事件 API
+└── frontend/                # Vue 3 前端（心跳保活 + 自动重连）
+```
+
+> 根目录下的 `sub.py`、`1.py`、`subagent_tutorial1.py`、`test.py` 是开发过程中的思路验证文件，加了注释说明用途，保留作为演进参考。
 
 ## 📊 真实操作审计日志片段
 
@@ -152,43 +185,54 @@ trace_id=... 🛡️ 代码网关：成功从上下文捞出忙碌时段: ["09:0
 * PostgreSQL (长期记忆 Store)
 * tenacity (网络重试)
 
-## 🔥 项目亮点（为什么说它是生产级？）
+## 🔥 项目亮点
 
-大模型从 Demo 玩具走向企业级生产线，差的不是代码量，而是对**数据确定性、系统幂等性、长效记忆力与链路可观测性**的工程化设计。本项目针对多智能体编排中常见的“状态机分裂、模型幻觉、工具死循环并发冲突”等深水区痛点，实现了以下硬核设计：
+在开发过程中遇到了一些典型问题，以下是针对这些问题的设计和解决方案：
 
-### 1. 下沉式确定性规则网关 (Deterministic Rule Gateway) —— 杜绝大模型“脑补”冲突
+### 1. 代码网关：用数学公式代替 LLM 判断时间冲突
 
-* **业务痛点**：传统 Agent 完全依赖 LLM 推理判定时间冲突，受模型幻觉（Hallucination）影响，极易在日历排布中出现时间交叉与逻辑死循环。
-* **架构设计**：项目彻底剥离了生成式大模型对敏感边界条件的“初审权”，下沉构建了纯 Python 强编码的**时间区间几何拦截网关**。
-* **落地效果**：通过 `max(req_start, slot_start) < min(req_end, slot_end)` 几何交集算法进行强数学判定，在工具层前置拦截 100% 的日程重叠，实现业务层面的**确定性熔断**。
+**问题**：LLM 判断时间冲突时经常出错，明明时间已被占用，它仍会调用创建接口。
 
-### 2. 全生命周期状态审计算子 (Lifecycle Stream Auditor) —— 解决智能体语义漂移误伤
+**做法**：不在 prompt 里让 LLM 判断，而是在 `create_calendar_event` 工具中硬编码一个区间交集公式：
 
-* **业务痛点**：在“调度总管-子智能体”协同中，子 Agent 往往喜欢输出带有丰富 Emoji 或口语化的“大白话邀功文本”。传统的单次消息拦截机制极易将其误判为“工具未正常调用”，从而触发系统的假阳性熔断。
-* **架构设计**：重构了 Supervisor Agent 的审计算子，改用基于 `ContextVars` 级联的**全生命周期消息全维扫描机制**。
-* **落地效果**：系统能够跨智能体节点动态捕获并净化状态流，彻底解决了多智能体在协同链条中的“精神分裂”与状态机冲突，保障流水线吞吐的**强一致性**。
+```python
+def is_overlapping(req_start, req_end, slot_str):
+    slot_start, slot_end = parse(slot_str)
+    return max(req_start, slot_start) < min(req_end, slot_end)
+```
 
-### 3. 多维业务动态加盐哈希 —— 构筑分布式并发幂等防护层 (Idempotent Shield)
+请求时间与已占时间有重叠，直接抛出 `BusinessError`，LLM 无法绕过。
 
-* **业务痛点**：大模型生成文本具有天然的随机性，如果因网络抖动、前端用户重复点击或 LLM 思考死循环导致工具重复调用，传统的基于纯文本哈希的防重机制会彻底失效（因为大模型每次改几个字，哈希就变了）。
-* **架构设计**：自研 `@idempotent` 装饰器，采用**核心业务维度剥离算法**。锁日历时强行提取 `User + Time + Title`，锁邮件时强行提取 `To_List + Subject` 动态加盐计算 MD5，并结合 Redis 实现分布式租约互斥（Distributed Lock）。
-* **落地效果**：构建了标准的状态机生命周期（`running` 抢锁中 / `done` 命中缓存截断 / `failed` 自动释放并指数退避重试）。即使大模型在描述中变换措辞，系统依然能精准拦截。
+### 2. 子 Agent 结果校验：检查工具是否真的被调用了
 
-### 4. 数据全链路防砸体系与强类型转换机制
+**问题**：子 Agent 有时输出了一大段文字说"已创建成功"，实际上根本没调用工具。Supervisor 容易误判。
 
-* **业务痛点**：在多 Agent 上下文互调时，底层工具返回的复杂格式（如 Json String）在大模型多轮对话截断后，极易被错误识别为基本字符并触发隐式的类型切片砸碎错误（Slice Fragmentation Bug）。
-* **架构设计**：全链路采用强类型防御机制，在所有状态扭转节点建立严格的 `JSON Str ── json.loads() ── Python Natvie List` 的闭环网关。
-* **落地效果**：将隐式异常消灭在工具调用入口前，系统具备极高的容错率与数据防砸处理能力。
+**做法**：在 `schedule_event` 工具返回前，扫描子 Agent 的所有消息，检查最后一条 AI 消息中是否有 `create_calendar_event` 的 tool_calls。如果没调用，返回空结果让 Supervisor 察觉异常。
+
+### 3. Redis 分布式幂等锁：重复请求只执行一次
+
+**问题**：网络抖动、用户重复点击或 LLM 死循环会导致同一请求被执行多次，邮件收了多份、日程建了多个。
+
+**做法**：用 `@idempotent` 装饰器包装工具函数，基于 `User + Time + Title` 等核心字段计算 MD5 作为 Redis 锁的 key。重复请求自旋等待（最多 5 次），直接返回第一次执行的结果，不重复调用工具。LLM 改描述措辞不影响幂等性，因为哈希只取关键字段，且收件人列表做了 `sorted()` 排序。
+
+**额外细节**：
+- 幂等锁状态的过期时间**差异化**：业务异常（参数传错）冷却 3 秒让 LLM 快速重试；系统崩溃（断网/宕机）冷却 10 秒做熔断保护。
+- 错误处理中间件 `handle_tool_errors` 识别 `GraphInterrupt` 信号（HITL 审批中断）时**透传不拦截**，放行给上层图引擎处理，避免审批卡死。
+
+### 4. 强类型转换：防止大模型截断破坏数据结构
+
+**问题**：子 Agent 返回的 JSON 字符串经过多轮对话后，大模型可能只截取部分内容，导致 `json.loads()` 失败。
+
+**做法**：在关键节点用 `json.loads()` 做显式反序列化，并在代码网关中直接调用内部函数获取数据，不经过 LLM 的文本生成，从源头保证数据格式正确。
 
 ---
 
-## 🧠 多智能体协同与工具防护系统能力一览
+## 🧠 系统能力小结
 
-* ▪ **双重防御矩阵**：第一道防线：Python 数学区间规则网关 ── 第二道防线：Redis 分布式租约互斥锁。
-* ▪ **全生命周期 Trace 审计**：基于链路上下文统一传递 `trace_id`，子智能体大白话发散 100% 兼容。
-* ▪ **长效偏好记忆感知**：依托 LangGraph Store 机制实现异步非阻塞的用户长效偏好（Preference）跨会话记忆写入。
-* ▪ **人机交互 (HITL) 安全沙箱**：支持敏感操作（发邮件/改日程）层级中断挂起，提供线上编辑、驳回、二次确认的可控人机协同能力。
-* ▪ **全异步高并发底座**："基于 asyncio + httpx 实现全异步工具链"，彻底告别传统 AI 编排的串行阻塞性能瓶颈。
+* **双重防御**：代码网关（数学公式） + Redis 幂等锁，两层防护防止异常操作。
+* **全链路 trace_id**：每次请求一个 trace_id，便于日志检索和问题定位。
+* **HITL 审批**：敏感操作触发中断，支持人工确认、修改或驳回。
+* **全异步**：asyncio + httpx + aiomysql，工具调用不阻塞事件循环。
 
 ---
 
@@ -197,13 +241,13 @@ trace_id=... 🛡️ 代码网关：成功从上下文捞出忙碌时段: ["09:0
 ![结果](./imgs/result.png)
 
 
-## 🚀 后续优化方向
+## 🚀 后续计划
 
-* [√] 接入 Redis 实现分布式幂等控制与过期自愈机制
-* [√] 基于 asyncio/httpx 实现全链路异步非阻塞工具链调用
-* [ ] 引入 LangGraph Store 实现异步非阻塞的用户偏好(Preference)长效记忆
-* [ ] **前后端分离聊天交互 (Web-UI)**：基于 FastAPI (Async) 搭建后端接口，利用 WebSocket / SSE (Server-Sent Events) 技术实现流式（Streaming）对话效果。
-* [ ] **动态交互审批流与锁管理**：结合 LangGraph 的 HITL 机制，当触发敏感工具时，通过异步接口向前端推送【审批卡片组件】；同时在后台集成 Redis 键值管理，支持手动释放幂等锁。
-* [ ] **全链路异步耗时监控 (OpenTelemetry)**：在 FastAPI 中集成 OTel 监控，对“用户提问-Agent编排-工具调用-模型响应”的全生命周期进行图形化耗时追踪，精准定位前端卡顿瓶颈。
-* [ ] **高并发多用户队列 (消息队列削峰)**：引入 RabbitMQ / Kafka 异步处理聊天事件流，对高并发请求进行排队削峰，保障多用户同时在线聊天时 Agent 系统的稳定性。
+* [x] Redis 分布式幂等锁
+* [x] asyncio 异步工具链
+* [ ] 用户偏好长期记忆（LangGraph Store）
+* [ ] 前端流式打字效果
+* [ ] 敏感操作前端审批卡片
+* [ ] OpenTelemetry 全链路监控
+* [ ] 消息队列削峰
 ---
