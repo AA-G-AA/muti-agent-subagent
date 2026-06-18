@@ -35,6 +35,12 @@ if _missing:
 DB_VECTOR = os.getenv("DB_URL") or "postgresql://postgres:postgres@localhost:5432/postgres"
 REDIS_URI = os.getenv("REDIS_URI") or "redis://localhost:6379"
 
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "root")
+MYSQL_DB = os.getenv("MYSQL_DB", "muti_agent")
+
 model = init_chat_model(
     base_url=os.getenv("OPENAI_BASE_URL"),
     api_key=os.getenv("OPENAI_API_KEY"),

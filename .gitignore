@@ -1,3 +1,18 @@
 __pycache__/
 *.pyc
 .env
+
+# 前端依赖和构建产物
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# IDE 配置
+.vscode/
+.idea/
+
+# 系统文件
+*.log
+.DS_Store
+Thumbs.db
+

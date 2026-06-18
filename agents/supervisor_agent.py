@@ -123,21 +123,25 @@ SUPERVISOR_PROMPT = (
     "When a request involves multiple actions, use multiple tools in sequence."
 )
 
-supervisor_agent = create_agent(
-    model,
-    tools=[schedule_event, manage_email],
-    middleware=[handle_tool_errors,
-                SummarizationMiddleware(
-                    model=model,
-                    # 满足到达模型最大输入 token 的 20 % 或 到达 100 个消息任一条件时触发汇总
-                    trigger=[("fraction", 0.2), ("messages", 100)],
-                    keep=("messages", 60),
-                ),
-    ],
-    checkpointer=storage.checkpointer,
-    store=storage.store,
-    system_prompt=SUPERVISOR_PROMPT,
-)
+supervisor_agent=None
+def init_supervisor_agent():
+    global supervisor_agent
+    supervisor_agent = create_agent(
+        model,
+        tools=[schedule_event, manage_email],
+        middleware=[handle_tool_errors,
+                    SummarizationMiddleware(
+                        model=model,
+                        # 满足到达模型最大输入 token 的 20 % 或 到达 100 个消息任一条件时触发汇总
+                        trigger=[("fraction", 0.2), ("messages", 100)],
+                        keep=("messages", 60),
+                    ),
+                    ],
+        checkpointer=storage.checkpointer,
+        store=storage.store,
+        system_prompt=SUPERVISOR_PROMPT,
+    )
+
 
 from agents.calender_agent import calendar_agent
 from agents.email_agent import email_agent

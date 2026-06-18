@@ -1,3 +1,10 @@
+# ============================================================
+# 📌 开发过程中的概念验证文件
+# 用途：测试子图 (Subgraph) 的 checkpointer 行为
+#      checkpointer=True / None / 独立存储 三种模式对比
+# 状态：保留作思路参考，不影响主程序运行
+# ============================================================
+
 import uuid
 from operator import add
 from typing import Annotated, TypedDict

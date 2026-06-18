@@ -9,6 +9,3 @@ if _root not in sys.path:
 # 2. 🌟 第二步：当路径修好后，安全地导入并对外暴露实例
 from .calender_agent import calendar_agent
 from .email_agent import email_agent
-from .supervisor_agent import supervisor_agent
-
-__all__ = ["calendar_agent", "email_agent", "supervisor_agent"]
