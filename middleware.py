@@ -126,7 +126,6 @@ def idempotent(key_func):
 async def handle_tool_errors(request, handler):
     """处理工具执行错误，带指数退避重试"""
     runtime = request.runtime
-    trace_id = runtime.config["configurable"]["trace_id"]
     logger.info(f" handle_tool_errors中间件调用")
 
     try:

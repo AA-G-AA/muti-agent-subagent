@@ -1,10 +1,11 @@
 #agents/supervisor_agent.py
 import logging
-from langchain.agents import create_agent
-from langchain.agents.middleware import SummarizationMiddleware
+from langchain.agents import create_agent, AgentState
+from langchain.agents.middleware import SummarizationMiddleware, dynamic_prompt, ModelRequest
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolRuntime
+from langgraph.types import Command
 
 # 🌟 1. 彻底干掉 .. 改为干干净净的绝对导入
 import storage
@@ -14,6 +15,10 @@ from tools.calender_tool import create_calendar_event,get_current_datetime
 from tools.email_tool import send_email
 
 logger = logging.getLogger(__name__)
+
+class SuperState(AgentState):
+    calendar_done: bool = False
+    email_done: bool = False
 
 @tool
 async def schedule_event(request: str, runtime: ToolRuntime) -> str:
@@ -37,8 +42,8 @@ async def schedule_event(request: str, runtime: ToolRuntime) -> str:
             "You are a calendar scheduling assistant. "
             "You ONLY handle calendar and scheduling tasks. "
             "Ignore any email or communication requests.\n\n"
-            "You are assisting with the following user inquiry:\n\n"
-            f"{summary_message.content}\n\n"
+            # "You are assisting with the following user inquiry:\n\n"
+            # f"{summary_message.content}\n\n"
             "You are tasked with the following sub-request:\n\n"
             f"{request}"
         )
@@ -63,6 +68,7 @@ async def schedule_event(request: str, runtime: ToolRuntime) -> str:
             "messages": [{"role": "user", "content": prompt}],
         }, config=runtime.config,
     )
+    logger.info(f"schedule_event的结果:{result}")
 
     # 1. 检查子 Agent 在最后一步到底调了哪些工具
     # 我们可以通过查看最后一条 AI 消息里是否包含 create_calendar_event 的 tool_calls
@@ -75,9 +81,33 @@ async def schedule_event(request: str, runtime: ToolRuntime) -> str:
     # has_created = False
     # if last_ai_msg and getattr(last_ai_msg, "tool_calls", None):
     #     has_created = any(tc["name"] == "create_calendar_event" for tc in last_ai_msg.tool_calls)
-    # 3. 提取所有的工具执行原始返回
-    tool_msgs = [m.content for m in result["messages"] if isinstance(m, ToolMessage)]
-    raw_tool_output = "\n".join(tool_msgs)
+    create_event_msg = next(
+        (m for m in reversed(result["messages"])
+         if isinstance(m, ToolMessage) and m.name == "create_calendar_event"),
+        None
+    )
+    if create_event_msg is None:
+        logger.info(f"❌ 日程未成功创建，可能时间冲突或参数缺失，请重新尝试。")
+        return Command(update={
+            "messages": [
+                ToolMessage(
+                    content="❌ 日程未成功创建，可能时间冲突或参数缺失，请重新尝试。",
+                    tool_call_id=runtime.tool_call_id,
+                )
+            ],
+            "calendar_done": False,
+        })
+    logger.info(f"✅ 日程已成功创建。{create_event_msg.content}")
+    return Command(update={
+        "messages": [
+            ToolMessage(
+                content=f"✅ 日程已成功创建。{create_event_msg.content}",
+                tool_call_id=runtime.tool_call_id,
+            )
+        ],
+        "calendar_done": True,
+    })
+
 
     # if not has_created:
     #     # 🚨 强行阻断！明确告诉主 Agent：因为时间冲突，日程根本没有创建！
@@ -89,7 +119,7 @@ async def schedule_event(request: str, runtime: ToolRuntime) -> str:
     #     )
 
     # 如果成功创建了，再返回正常的流水
-    return raw_tool_output
+    # return raw_tool_output
 
 @tool
 async def manage_email(request: str, runtime: ToolRuntime) -> str:
@@ -106,8 +136,31 @@ async def manage_email(request: str, runtime: ToolRuntime) -> str:
     result = await email_agent.ainvoke({
         "messages": [{"role": "user", "content": request}]
     }, config=runtime.config)
+    logger.info(f"manage_email的结果:{result}")
     # Option 1: Return just the confirmation message
-    return result["messages"][-1].content
+    # 检查邮件 Agent 最后是否真的调用了 send_email
+    send_email_result = next(
+        (m for m in result["messages"]
+         if isinstance(m, ToolMessage) and m.name == "send_email"),
+        None
+    )
+
+    if send_email_result is None:
+        return Command(update={
+            "messages": [ToolMessage(
+                content="❌ 邮件未成功发送，可能缺少必要参数，请重新尝试。",
+                tool_call_id=runtime.tool_call_id,
+            )],
+            "email_done": False,
+        })
+
+    return Command(update={
+        "messages": [ToolMessage(
+            content=f"✅ 邮件已成功发送。{send_email_result.content}",
+            tool_call_id=runtime.tool_call_id,
+        )],
+        "email_done": True,
+    })
     # Option 2: Return structured data
     # return json.dumps({
     #     "status": "success",
@@ -120,8 +173,25 @@ SUPERVISOR_PROMPT = (
     "You are a helpful personal assistant. "
     "You can schedule calendar events and send emails. "
     "Break down user requests into appropriate tool calls and coordinate the results. "
-    "When a request involves multiple actions, use multiple tools in sequence."
+    "When a request involves multiple actions, use multiple tools in sequence. "
+    "\n\nCRITICAL RULE: If a tool returns a message confirming the task is already "
+    "complete (e.g., containing '已完成' or '无需重复'), you MUST NOT call that same "
+    "tool again with the same request. Instead, summarize the results and respond "
+    "directly to the user."
+    "\n\nIMPORTANT: When a tool result contains a URL/link (e.g. calendar event link), "
+    "you MUST include that exact URL verbatim in your final response to the user. "
+    "Do NOT omit, shorten, or paraphrase the link."
 )
+@dynamic_prompt
+def change_system_prompt(request: ModelRequest):
+    status = []
+    if request.state.get("calendar_done", False):
+        status.append("- 日程已创建完成，绝对不要再调用 schedule_event。")
+    if request.state.get("email_done", False):
+        status.append("- 邮件已发送完成，绝对不要再调用 manage_email。")
+    if status:
+        return SUPERVISOR_PROMPT + "\n\n当前任务状态：\n" + "\n".join(status)
+    return SUPERVISOR_PROMPT
 
 supervisor_agent=None
 def init_supervisor_agent():
@@ -130,6 +200,7 @@ def init_supervisor_agent():
         model,
         tools=[schedule_event, manage_email],
         middleware=[handle_tool_errors,
+                    change_system_prompt,
                     SummarizationMiddleware(
                         model=model,
                         # 满足到达模型最大输入 token 的 20 % 或 到达 100 个消息任一条件时触发汇总
@@ -139,7 +210,8 @@ def init_supervisor_agent():
                     ],
         checkpointer=storage.checkpointer,
         store=storage.store,
-        system_prompt=SUPERVISOR_PROMPT,
+        #system_prompt=SUPERVISOR_PROMPT,
+        state_schema=SuperState
     )
 
 
