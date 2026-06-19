@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 from config import REDIS_URI, _trace_id_var
-from storage import r
+import storage
 
 
 logger = logging.getLogger(__name__)
@@ -25,20 +25,20 @@ logger = logging.getLogger(__name__)
 )
 async def get_tenant_access_token(app_id, app_secret):
     """获取飞书Token"""
-    token =await r.get("feishu_token")
+    token =await storage.r.get("feishu_token")
 
     # token 还有超过5分钟有效期，直接用缓存
     if token:
-        ttl=await r.ttl("feishu_token")
+        ttl=await storage.r.ttl("feishu_token")
         logger.debug(f"[飞书Token] 命中缓存，剩余 {ttl} 秒")
         return token
 
     logger.info("[飞书日历机器人Token] 缓存过期，重新获取...")
     # 🌟 进阶细节：为了防止高并发下 10 个工具同时刷新 Token 导致击穿飞书限频，
     # 我们可以利用 Redis 的单线程特性加个简易的分布式锁拦截一下
-    async with r.lock("lock:refresh_feishu_token",timeout=10):
+    async with storage.r.lock("lock:refresh_feishu_token",timeout=10):
         # 再次双重检查，防止排队期间前一个线程已经拿到了
-        token = await r.get("feishu_token")
+        token =await storage.r.get("feishu_token")
         if token:
             return token
         try:
@@ -54,7 +54,7 @@ async def get_tenant_access_token(app_id, app_secret):
 
                 token = data["tenant_access_token"]
                 expire = data.get("expire", 7200)
-                await r.setex("feishu_token", expire - 300, token)
+                await storage.r.setex("feishu_token", expire - 300, token)
 
                 logger.info(f"[飞书Token] 获取成功，有效期 {data.get('expire', 7200)} 秒")
                 return token

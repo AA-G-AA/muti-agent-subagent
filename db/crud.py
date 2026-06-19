@@ -25,7 +25,7 @@ async def get_sessions(user_id: str = "default"):
     async with get_pool().acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute(
-                "SELECT id, title, created_at, updated_at FROM sessions WHERE user_id=%s ORDER BY created_at DESC",
+                "SELECT id, title, created_at, updated_at FROM sessions WHERE user_id=%s ORDER BY updated_at DESC",
                 (user_id,)
             )
             return await cur.fetchall()

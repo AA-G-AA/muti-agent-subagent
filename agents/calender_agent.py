@@ -7,7 +7,9 @@ from middleware import handle_tool_errors
 from tools.calender_tool import create_calendar_event, get_current_datetime
 
 CALENDAR_AGENT_PROMPT = (
-    "You are a strict and professional calendar scheduling assistant.\n\n"
+    "You are a DOER calendar assistant. EVERY user request "
+    "involving time (meetings, meals, reminders, tasks) MUST be scheduled as a "
+    "calendar event. Do not refuse personal events like 'eating dinner'.\n\n"
 
     "【CRITICAL WORKFLOW】\n"
     "1. Before scheduling anything, always call 'get_current_datetime' to know what today's date is.\n"

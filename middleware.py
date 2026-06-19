@@ -9,9 +9,8 @@ from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 from langgraph.errors import GraphInterrupt
 
-from storage import r
+import storage
 from errors import *
-
 
 logger = logging.getLogger(__name__)
 def idempotent(key_func):
@@ -37,7 +36,7 @@ def idempotent(key_func):
             for attempt in range(max_wait_attempts):
                 now_ts = datetime.now(timezone.utc).timestamp()
                 # 抢锁
-                lock_success = await r.set(
+                lock_success = await storage.r.set(
                     redis_key,
                     json.dumps({"status": "running", "timestamp": now_ts}),
                     nx=True,
@@ -53,7 +52,7 @@ def idempotent(key_func):
                 # --------------------------------------------------------
 
 
-                cached_raw = await r.get(redis_key)
+                cached_raw = await storage.r.get(redis_key)
                 #高并发可能get时,前一个任务就过期了
                 # 优化：如果恰好前一个任务过期蒸发了，不直接报错！
                 # 原地眯 1 秒，直接通过 continue 进入下一次循环，下一轮直接变成“抢锁成功的开拓者”
@@ -102,21 +101,21 @@ def idempotent(key_func):
                     result = await func(*args, **kwargs)
                 else:
                     result = func(*args, **kwargs)
-                await r.set(redis_key, json.dumps({"status": "done", "result": result}), ex=3600)
+                await storage.r.set(redis_key, json.dumps({"status": "done", "result": result}), ex=3600)
                 logger.info(f"[{tool_name}] ✅ 执行成功，结果已写入缓存")
                 return result
 
             except BusinessError as e:
                 # 💡 业务已知异常（比如大模型参数传错了）：冷却 3 秒足够了
                 # 方便大模型迅速修正参数后，在下一轮对话里能立刻重新调通工具
-                await r.set(redis_key, json.dumps({"status": "failed"}), ex=3)
+                await storage.r.set(redis_key, json.dumps({"status": "failed"}), ex=3)
                 logger.warning(f"[{tool_name}] ⚠️ 业务失败: error={e}")
                 return str(e)
 
             except Exception as e:
                 #系统未知崩溃（比如断网、第三方服务器宕机）：维持 10 秒
                 # 启动长达 5 分钟的熔断保护，防止大模型疯狂轰炸死去的接口
-                await r.set(redis_key, json.dumps({"status": "failed"}), ex=10)
+                await storage.r.set(redis_key, json.dumps({"status": "failed"}), ex=10)
                 logger.error(f"[{tool_name}] 💥 系统崩溃: error={e}")
                 raise
 
