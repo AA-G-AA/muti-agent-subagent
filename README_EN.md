@@ -91,6 +91,37 @@ The `@idempotent` decorator prevents duplicate tool executions caused by network
 ```
 
 ---
+### Deployment Topology
+
+```
+┌───────────┐     WebSocket      ┌ ─────────────────────────┐
+│  Vue 3    │ ◄──────────────►   │    FastAPI Backend       │
+│  Frontend │                    │                          │
+│           │                    │  ┌────────────────────┐  │
+│ Heartbeat │                    │  │  Agent Layer       │  │
+│ Auto-Recon│                    │  │  Supervisor        │  │
+└───────────┘                    │  │  ├─ Calendar Agent │  │
+                                 │  │  └─ Email Agent    │  │
+                                 │  └────────────────────┘  │
+                                 │          │               │
+                                 │          ▼               │
+                                 │  ┌────────────────────┐  │
+                                 │  │      MySQL         │  │
+                                 │  │ Session/Messages   │  │
+                                 │  └────────────────────┘  │
+                                 └──────────┬───────────────┘
+                                            │
+        ┌───────────────────────────────────┼───────────────────────────┐
+        ▼                                   ▼                           ▼
+┌──────────────────┐             ┌──────────────────┐     ┌──────────────────────┐
+│      Redis       │             │   PostgreSQL     │     │  Feishu Calendar API │
+│                  │             │                  │     │  QQ Mail SMTP        │
+│ • Idempotent Lock│             │  LangGraph       │     │                      │
+│ • Distributed Lk │             │  Store           │     │                      │
+│ • Token Cache    │             │  (Long-term mem) │     │                      │
+│ • Checkpoint     │             │                  │     │                      │
+└──────────────────┘             └──────────────────┘     └──────────────────────┘
+```
 
 ## 🔁 Idempotency & Gateway Design
 
