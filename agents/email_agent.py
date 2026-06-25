@@ -19,10 +19,10 @@ email_agent = create_agent(
     tools=[send_email],
     middleware=[
         handle_tool_errors,
-
     ],
     system_prompt=EMAIL_AGENT_PROMPT,
     store=storage.store,
     checkpointer=None,
+    name="email_agent"
     # checkpointer=InMemorySaver(),
 )

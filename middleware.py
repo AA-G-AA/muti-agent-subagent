@@ -4,7 +4,7 @@ from functools import wraps
 from datetime import datetime, timezone, timedelta
 import asyncio
 import logging
-
+from session_manager import session_manager
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 from langgraph.errors import GraphInterrupt
@@ -13,6 +13,9 @@ import storage
 from errors import *
 
 logger = logging.getLogger(__name__)
+
+# 全局 WebSocket 推送队列：各中间件把状态写进去，api/chat.py 消费推给前端
+tool_status_queue: asyncio.Queue = asyncio.Queue()
 def idempotent(key_func):
     """异步 Redis 原子幂等装饰器（带自旋排队等待，不浪费 Token）"""
     def decorator(func):
@@ -105,6 +108,15 @@ def idempotent(key_func):
                 logger.info(f"[{tool_name}] ✅ 执行成功，结果已写入缓存")
                 return result
 
+            except GraphInterrupt:
+                # 正常的人工审批暂停，不是失败，锁的状态不动它，只是把存活时间续长一点
+                # 因为人工审批可能要等很久，3分钟的锁(ex=180)很可能撑不到用户做出决定
+                await storage.r.set(redis_key, json.dumps(
+                    {"status": "running", "timestamp": datetime.now(timezone.utc).timestamp()}), ex=86400)
+                logger.info(f"[{tool_name}] ⏸️ 等待人工审批，锁续期至24小时")
+                raise
+
+
             except BusinessError as e:
                 # 💡 业务已知异常（比如大模型参数传错了）：冷却 3 秒足够了
                 # 方便大模型迅速修正参数后，在下一轮对话里能立刻重新调通工具
@@ -125,8 +137,21 @@ def idempotent(key_func):
 @wrap_tool_call
 async def handle_tool_errors(request, handler):
     """处理工具执行错误，带指数退避重试"""
+
     runtime = request.runtime
     logger.info(f" handle_tool_errors中间件调用")
+
+    # 推送工具调用状态到前端
+    tool_name = request.tool_call.get("name", "unknown")
+    tool_args = request.tool_call.get("args", {})
+    logger.info(f"[handle_tool_errors] 推送 tool_call: {tool_name}")
+    thread_id = request.runtime.config.get("configurable", {}).get("thread_id", "default")
+    session_queue = await session_manager.get_queue(thread_id)
+    await session_queue.put({
+        "type": "tool_call",
+        "tool_name": tool_name,
+        "args": tool_args,
+    })
 
     try:
         return await handler(request)

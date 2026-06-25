@@ -97,6 +97,7 @@ async def send_email(
     """通过邮件API发送邮件。需要正确格式的邮箱地址。"""
     # 占位实现：实际使用时，这里会调用 SendGrid、Gmail API 等
     # 1. 读取配置
+
     trace_id = runtime.config["configurable"].get("trace_id")
     sender = os.getenv("EMAIL_SENDER")  # 发件人QQ邮箱
     password = os.getenv("EMAIL_PASSWORD")  # QQ邮箱授权码

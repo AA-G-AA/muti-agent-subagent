@@ -57,8 +57,9 @@ async def create_calendar_event(
 ) -> str:
     """创建飞书日历事件，时间格式：2024-01-15 14:00:00"""
 
+
     trace_id = runtime.config["configurable"].get("trace_id")
-    logger.info(f"create_calendar_event工具调用...")
+    logger.info(f"🔥🔥🔥 create_calendar_event 被调用！")
     #print(runtime)
 
     CALENDER_BOT_APP_SECRET = os.getenv("CALENDER_BOT_APP_SECRET")
