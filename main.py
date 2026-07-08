@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import logging
 import sys
 import agents.supervisor_agent as supervisor_agent_module
+from agents.memory_worker import memory_sub_agent_worker
 from agents.supervisor_agent import init_supervisor_agent
 from db import init_mysql, close_mysql, init_tables
 from fastapi import FastAPI, Request
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    memory_worker_task = None
+
     # 启动时
     logger.info("🚀 正在初始化 MySQL...")
     await init_mysql()
@@ -46,8 +49,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"  agent 初始化前: {supervisor_agent_module.supervisor_agent}")
     init_supervisor_agent()
     logger.info(f"  agent 初始化后: {supervisor_agent_module.supervisor_agent}")
+    memory_worker_task = asyncio.create_task(
+        memory_sub_agent_worker(storage.r, storage.store)
+    )
+    logger.info("✅ 长期记忆 Redis Stream Worker 已启动")
 
-    yield
+    try:
+        yield
+    finally:
+        if memory_worker_task and not memory_worker_task.done():
+            memory_worker_task.cancel()
+            try:
+                await memory_worker_task
+            except asyncio.CancelledError:
+                logger.info("🛑 长期记忆 Redis Stream Worker 已停止")
     # 关闭时
     logger.info("🛑 正在关闭 MySQL...")
     await close_mysql()

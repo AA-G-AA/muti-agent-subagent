@@ -5,7 +5,7 @@ import redis.asyncio as aioredis
 from langgraph.checkpoint.redis import AsyncRedisSaver
 from langgraph.store.postgres import AsyncPostgresStore
 
-from config import REDIS_URI, DB_VECTOR
+from config import REDIS_URI, DB_VECTOR,embedding
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,14 @@ async def init_storage():
     logger.info(f"✅ Redis checkpointer 初始化完成: {checkpointer}")
 
     logger.info("🔌 正在连接 PostgreSQL...")
-    _store_cm = AsyncPostgresStore.from_conn_string(DB_VECTOR)
+    _store_cm = AsyncPostgresStore.from_conn_string(
+        DB_VECTOR,
+        index={
+            "embed": embedding,  # 使用 OpenAI embedding
+            "dims": 1536,  # OpenAI text-embedding-3-small 维度
+            "fields": ["value", "$"],  # 索引 value 字段和所有顶层字段
+        }
+    )
     store = await _store_cm.__aenter__()
     await store.setup()
     logger.info(f"✅ PostgreSQL store 初始化完成: {store}")

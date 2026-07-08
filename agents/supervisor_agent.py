@@ -1,4 +1,7 @@
 #agents/supervisor_agent.py
+from dataclasses import dataclass
+from typing import Optional
+
 from langchain.agents import create_agent, AgentState
 from langchain.agents.middleware import SummarizationMiddleware, dynamic_prompt, ModelRequest, after_model, \
     before_model, HumanInTheLoopMiddleware
@@ -17,6 +20,12 @@ from middleware import handle_tool_errors
 
 logger = logging.getLogger(__name__)
 
+# 定义一个数据类，用于描述运行时上下文中携带的自定义信息
+@dataclass
+class Context:
+    user_id: str
+    user_role: Optional[str] = "user"  # admin / user
+    user_name: Optional[str] = None
 class SuperState(AgentState):
     calendar_done: bool = False
     email_done: bool = False
@@ -204,9 +213,6 @@ async def manage_email(request: str, runtime: ToolRuntime) -> str:
 
 
 
-
-
-
 @before_model(can_jump_to=["end"])
 def check_reject_before_model(state, runtime):
     logger.info("=" * 60)
@@ -321,16 +327,158 @@ SUPERVISOR_PROMPT = (
     "- Only respond to the user's latest request, using the summary silently as background knowledge.\n"
 )
 @dynamic_prompt
-def change_system_prompt(request: ModelRequest):
-    status = []
-    if request.state.get("calendar_done", False):
-        status.append("- 日程已创建完成，绝对不要再调用 schedule_event。")
-    if request.state.get("email_done", False):
-        status.append("- 邮件已发送完成，绝对不要再调用 manage_email。")
-    if status:
-        return SUPERVISOR_PROMPT + "\n\n当前任务状态：\n" + "\n".join(status)
-    return SUPERVISOR_PROMPT
+async def change_system_prompt(request: ModelRequest):
+    # ========== 1. 打印完整的 Request 对象 ==========
+    logger.info("=" * 80)
 
+    runtime = request.runtime
+    store = runtime.store
+    context = runtime.context
+
+    user_id = context.user_id
+    logger.info(f"👤 用户ID: {user_id}")
+    logger.info(f"📋 Context: {context}")
+
+    memory_lines = []
+
+    if store:
+        try:
+            # =========================================================
+            # 1. 精确读取 profile 域（常驻画像）
+            # =========================================================
+            PROFILE_KEYS = {"name", "city", "occupation"}
+            logger.info(f"🔍 开始读取画像字段: {PROFILE_KEYS}")
+
+            for key in PROFILE_KEYS:
+                item = await store.aget((user_id, "profile"), key)
+                if item and isinstance(item.value, dict) and "value" in item.value:
+                    val = item.value['value']
+                    memory_lines.append(f"- {key}: {val}")
+                    logger.info(f"   ✅ 画像命中: {key} = {val}")
+                else:
+                    logger.info(f"   ❌ 画像未命中: {key}")
+
+            # =========================================================
+            # 2. 精确读取 preferences 域（偏好）
+            # =========================================================
+            PREFERENCE_KEYS = {"food", "food_avoid"}
+            logger.info(f"🔍 开始读取偏好字段: {PREFERENCE_KEYS}")
+
+            for key in PREFERENCE_KEYS:
+                item = await store.aget((user_id, "preferences"), key)
+                if item and isinstance(item.value, dict) and "value" in item.value:
+                    val = item.value['value']
+                    if isinstance(val, list):
+                        val = ", ".join(val)
+                    memory_lines.append(f"- {key}: {val}")
+                    logger.info(f"   ✅ 偏好命中: {key} = {val}")
+
+            # =========================================================
+            # 3. 语义检索（长尾记忆，作为补充）
+            # =========================================================
+            latest_msg = ""
+            msgs = request.state.get("messages", [])
+            logger.info(f"📨 消息列表数量: {len(msgs)}")
+
+            for m in reversed(msgs):
+                if getattr(m, "type", "") == "human" and hasattr(m, "content"):
+                    latest_msg = m.content
+                    logger.info(f"💬 最新用户消息: {latest_msg[:100]}...")
+                    break
+
+            if latest_msg:
+                # ✅ 降低阈值到 0.44
+                threshold = 0.44
+                logger.info(f"🔎 语义检索: query='{latest_msg[:50]}...' (阈值={threshold})")
+
+                memories = await store.asearch(
+                    (user_id,),
+                    query=latest_msg,
+                    limit=5,
+                )
+                logger.info(f"   📊 语义检索召回 {len(memories)} 条记忆")
+
+                # ✅ 收集已精确读取的 key，避免重复
+                existing_keys = set()
+                for line in memory_lines:
+                    if line.startswith("- "):
+                        key = line.split(":")[0].replace("- ", "").strip()
+                        existing_keys.add(key)
+
+                for m in memories:
+                    # ✅ 跳过已精确读取的
+                    if m.key in existing_keys:
+                        logger.info(f"   ⏭️ 跳过已精确读取: {m.key}")
+                        continue
+
+                    # ✅ 处理 score 为 None 的情况
+                    score = getattr(m, "score", 0.0)
+                    if score is None:
+                        score = 0.0
+
+                    if score >= threshold:
+                        val = m.value
+                        if isinstance(val, dict) and "value" in val:
+                            val = val['value']
+                            if isinstance(val, list):
+                                val = ", ".join(val)
+                            memory_lines.append(f"- {m.key}: {val}")
+                            logger.info(f"   ✅ 语义命中: {m.key} = {val} (score={score:.3f})")
+                        else:
+                            logger.warning(f"   ⚠️ 记忆值格式异常: {m.key} -> {type(val)}")
+                    else:
+                        logger.info(f"   ⏭️ 低于阈值: {m.key} (score={score:.3f} < {threshold})")
+            else:
+                logger.info("⚠️ 未找到用户最新消息，跳过语义检索")
+
+        except Exception as e:
+            logger.error(f"💥 读取长期记忆失败: {e}", exc_info=True)
+    else:
+        logger.warning("⚠️ Store未初始化，无法读取记忆")
+
+    # ========== 4. 构建记忆部分 ==========
+    if memory_lines:
+        memory_lines.insert(0, "=== 用户画像（请记住）===")
+        logger.info(f"📝 最终记忆条数: {len(memory_lines) - 1}")
+        for line in memory_lines:
+            logger.info(f"   {line}")
+    else:
+        logger.info("📝 无记忆注入")
+
+    # ========== 5. 任务状态 ==========
+    status = []
+    calendar_done = request.state.get("calendar_done", False)
+    email_done = request.state.get("email_done", False)
+
+    if calendar_done:
+        status.append("- 日程已创建完成，绝对不要再调用 schedule_event。")
+        logger.info("📌 状态: calendar_done=True")
+    if email_done:
+        status.append("- 邮件已发送完成，绝对不要再调用 manage_email。")
+        logger.info("📌 状态: email_done=True")
+
+    if not status:
+        logger.info("📌 无任务状态")
+
+    # ========== 6. 组装最终 Prompt ==========
+    parts = [SUPERVISOR_PROMPT]
+    if memory_lines:
+        parts.append("\n".join(memory_lines))
+    if status:
+        parts.append("\n\n当前任务状态：\n" + "\n".join(status))
+
+    final_prompt = "\n".join(parts)
+
+    # ========== 7. 打印完整的 System Prompt ==========
+    logger.info("=" * 80)
+    logger.info("📋 最终 System Prompt (完整):")
+    logger.info("-" * 80)
+    logger.info(final_prompt)
+    logger.info("-" * 80)
+    logger.info(f"📏 Prompt 总长度: {len(final_prompt)} 字符")
+    logger.info("=" * 80)
+
+    return final_prompt
 supervisor_agent=None
 def init_supervisor_agent():
     global supervisor_agent
@@ -367,7 +515,8 @@ def init_supervisor_agent():
         checkpointer=storage.checkpointer,
         store=storage.store,
         #system_prompt=SUPERVISOR_PROMPT,
-        state_schema=SuperState
+        state_schema=SuperState,
+        context_schema=Context
     )
 
 

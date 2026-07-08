@@ -6,6 +6,8 @@ from langchain.chat_models import init_chat_model
 import logging
 import contextvars
 
+from langchain_ollama import OllamaEmbeddings
+
 _trace_id_var = contextvars.ContextVar("trace_id", default="no-trace")
 
 class TraceIdFilter(logging.Filter):
@@ -45,12 +47,37 @@ model = init_chat_model(
     base_url=os.getenv("OPENAI_BASE_URL"),
     api_key=os.getenv("OPENAI_API_KEY"),
     model_provider="openai",
-    model="GLM-4.5-Flash",
+    model="deepseek-v4-flash",
     profile={"max_input_tokens": 128000},
     temperature=0.1,
     timeout=120,
 )
+verifier_model = init_chat_model(
+    base_url=os.getenv("OPENAI_BASE_URL"),
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model_provider="openai",
+    model="deepseek-v4-flash",
+    temperature=0.1,
+    timeout=120,
+)
+memory_model = init_chat_model(
+    base_url=os.getenv("OPENAI_BASE_URL"),
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model_provider="openai",
+    model="deepseek-v4-flash",
+    temperature=0.1,
+    timeout=120,
+)
+embedding = OllamaEmbeddings(
+    model="bge-m3:latest",
+    base_url="http://localhost:11434",
+)
+# ===== Mock 模式 =====
+MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() == "true"
 
-
+if MOCK_MODE:
+    from langchain_core.language_models import FakeListChatModel
+    model = FakeListChatModel(responses=["你好！我是你的 AI 助手。"])
+    print("🧪 Mock 模式启动")
 # os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING")
 # os.environ["LANGSMITH_API_KEY"] = os.getenv("LANGSMITH_API_KEY")

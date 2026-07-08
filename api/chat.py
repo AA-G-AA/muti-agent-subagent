@@ -1,6 +1,8 @@
 # api/chat.py
 import logging
 import asyncio
+from dataclasses import dataclass
+from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from langchain_core.messages import AIMessageChunk, AIMessage
@@ -8,12 +10,19 @@ from langchain_core.utils.uuid import uuid7
 from langgraph.types import Command
 
 import agents.supervisor_agent as supervisor_agent_module
+import storage
+from agents.memory_worker import MemoryTask, enqueue_memory_task
 from config import _trace_id_var
 from db import create_session, save_message
 from session_manager import session_manager, SessionState
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+@dataclass
+class Context:
+    user_id: str
+    user_role: Optional[str] = "user"  # admin / user
+    user_name: Optional[str] = None
 
 import json
 
@@ -59,7 +68,7 @@ async def _push_tool_status(session_id: str, websocket: WebSocket):
         logger.info(f"📤 push_task 结束: session={session_id}")
 
 
-async def _stream_agent(websocket, stream_input, config):
+async def _stream_agent(websocket, stream_input, config,context):
     full_reply = ""
     interrupted = False
     before_model_reply = ""
@@ -67,6 +76,7 @@ async def _stream_agent(websocket, stream_input, config):
     async for chunk in supervisor_agent_module.supervisor_agent.astream(
             stream_input,
             config,
+            context=context,
             stream_mode=["messages", "updates"],
     ):
         chunk_type, chunk_data = chunk
@@ -149,11 +159,11 @@ async def websocket_chat(websocket: WebSocket):
             config = {
                 "configurable": {
                     "thread_id": thread_id,
-                    "user_id": "web_user",
                     "trace_id": trace_id,
                 },
                 "recursion_limit": 30,
             }
+            context = Context(user_id = "web_user")
             _trace_id_var.set(trace_id)
 
             # ===== 获取或创建会话上下文 =====
@@ -178,6 +188,7 @@ async def websocket_chat(websocket: WebSocket):
                     websocket,
                     Command(resume={"decisions": decisions}),
                     config,
+                    context
                 )
 
                 # 🔥 恢复 STREAMING 状态
@@ -232,7 +243,7 @@ async def websocket_chat(websocket: WebSocket):
                 else:
                     stream_input = {"messages": [{"role": "user", "content": user_message}]}
 
-                full_reply, interrupted = await _stream_agent(websocket, stream_input, config)
+                full_reply, interrupted = await _stream_agent(websocket, stream_input, config,context)
 
                 # 🔥 检查是否有中断
                 if interrupted:
@@ -246,6 +257,12 @@ async def websocket_chat(websocket: WebSocket):
                     if full_reply:
                         logger.info(f"📤 Agent 回复: {full_reply[:100]}...")
                         await save_message(thread_id, "assistant", full_reply)
+                        await enqueue_memory_task(storage.r, MemoryTask(
+                            user_id=config["configurable"].get("user_id", "web_user"),
+                            thread_id=thread_id,
+                            human_msg=user_message,
+                            ai_msg=full_reply,
+                        ))
                         await websocket.send_text(safe_json_dumps({"type": "done"}))
 
             finally:
